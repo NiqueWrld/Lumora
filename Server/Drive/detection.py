@@ -1,7 +1,9 @@
-"""Driver state detection: head pose (road focus) + hands in the wheel zone.
+"""Driver state detection: head pose (road focus), hands in the wheel zone,
+and phone use.
 
-Uses the MediaPipe Tasks API (FaceLandmarker + HandLandmarker). The .task
-model files are downloaded automatically on first run into Server/models/.
+Uses the MediaPipe Tasks API (FaceLandmarker + HandLandmarker +
+ObjectDetector). The model files are downloaded automatically on first run
+into Server/Drive/models/.
 """
 
 import math
@@ -27,6 +29,10 @@ _MODEL_URLS = {
     "hand_landmarker.task": (
         "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
         "hand_landmarker/float16/1/hand_landmarker.task"
+    ),
+    "efficientdet_lite0.tflite": (
+        "https://storage.googleapis.com/mediapipe-models/object_detector/"
+        "efficientdet_lite0/float16/1/efficientdet_lite0.tflite"
     ),
 }
 
@@ -119,17 +125,32 @@ class DriverMonitor:
                 min_tracking_confidence=config.MIN_HAND_TRACKING_CONF,
             )
         )
+        self._phone = vision.ObjectDetector.create_from_options(
+            vision.ObjectDetectorOptions(
+                base_options=mp_tasks.BaseOptions(
+                    model_asset_path=paths["efficientdet_lite0.tflite"]
+                ),
+                running_mode=vision.RunningMode.VIDEO,
+                category_allowlist=["cell phone"],
+                score_threshold=config.MIN_PHONE_DETECTION_CONF,
+                max_results=2,
+            )
+        )
         self._focus_smoother = _BoolSmoother(
             config.SMOOTHING_WINDOW, config.SMOOTHING_THRESHOLD
         )
         self._hands_smoother = _BoolSmoother(
             config.SMOOTHING_WINDOW, config.SMOOTHING_THRESHOLD
         )
+        self._phone_smoother = _BoolSmoother(
+            config.SMOOTHING_WINDOW, config.PHONE_SMOOTHING_THRESHOLD
+        )
         self._last_ts_ms = 0
 
     def close(self):
         self._face.close()
         self._hands.close()
+        self._phone.close()
 
     def process(self, frame):
         """Analyze a BGR frame. Returns (annotated_frame, status_dict)."""
@@ -141,6 +162,7 @@ class DriverMonitor:
 
         face_result = self._face.detect_for_video(mp_image, ts_ms)
         hand_result = self._hands.detect_for_video(mp_image, ts_ms)
+        phone_result = self._phone.detect_for_video(mp_image, ts_ms)
 
         head_pose = None
         face_detected = False
@@ -157,9 +179,11 @@ class DriverMonitor:
                 )
 
         hands_in_zone, hands_detected = self._check_hands(frame, hand_result, w, h)
+        phone_now = self._draw_phones(frame, phone_result)
 
         focused = self._focus_smoother.update(face_detected and looking_at_road_now)
         both_hands = self._hands_smoother.update(hands_in_zone >= 2)
+        phone_use = self._phone_smoother.update(phone_now)
 
         alerts = []
         if not face_detected:
@@ -168,6 +192,8 @@ class DriverMonitor:
             alerts.append("EYES ON THE ROAD")
         if not both_hands:
             alerts.append("BOTH HANDS ON THE WHEEL")
+        if phone_use:
+            alerts.append("PUT THE PHONE DOWN")
 
         status = {
             "timestamp": time.time(),
@@ -178,7 +204,8 @@ class DriverMonitor:
             "hands_detected": hands_detected,
             "hands_in_wheel_zone": hands_in_zone,
             "both_hands_on_wheel": both_hands,
-            "driver_ok": focused and both_hands,
+            "phone_detected": phone_use,
+            "driver_ok": focused and both_hands and not phone_use,
             "alerts": alerts,
         }
 
@@ -260,6 +287,22 @@ class DriverMonitor:
         )
         return hands_in_zone, hands_detected
 
+    def _draw_phones(self, frame, phone_result) -> bool:
+        """Draw detected phone bounding boxes. Returns True if any phone seen."""
+        found = False
+        for det in phone_result.detections:
+            found = True
+            box = det.bounding_box
+            x1, y1 = box.origin_x, box.origin_y
+            x2, y2 = x1 + box.width, y1 + box.height
+            score = det.categories[0].score if det.categories else 0.0
+            cv2.rectangle(frame, (x1, y1), (x2, y2), _RED, 2)
+            cv2.putText(
+                frame, f"PHONE {score:.0%}", (x1, max(y1 - 8, 16)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, _RED, 2,
+            )
+        return found
+
     def _draw_overlay(self, frame, status, w, h):
         rows = [
             (
@@ -270,8 +313,12 @@ class DriverMonitor:
                 f"HANDS ON WHEEL: {status['hands_in_wheel_zone']}/2",
                 status["both_hands_on_wheel"],
             ),
+            (
+                f"PHONE: {'DETECTED' if status['phone_detected'] else 'NO'}",
+                not status["phone_detected"],
+            ),
         ]
-        cv2.rectangle(frame, (10, 10), (340, 108), (30, 30, 30), -1)
+        cv2.rectangle(frame, (10, 10), (340, 138), (30, 30, 30), -1)
         y = 38
         for text, ok in rows:
             cv2.putText(

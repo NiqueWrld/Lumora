@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Camera,
+  DeviceMobile,
   Eye,
   HandPalm,
   SteeringWheel,
@@ -164,6 +165,12 @@ function Monitor() {
       ok: status?.both_hands_on_wheel ?? false,
       detail: `${status?.hands_in_wheel_zone ?? 0}/${status?.hands_detected ?? 0} in wheel zone`,
       icon: HandPalm,
+    },
+    {
+      label: 'Phone',
+      ok: !(status?.phone_detected ?? false),
+      detail: status?.phone_detected ? 'Phone in use' : 'No phone visible',
+      icon: DeviceMobile,
     },
   ]
 

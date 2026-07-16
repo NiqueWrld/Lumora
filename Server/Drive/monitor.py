@@ -20,6 +20,7 @@ _INITIAL_STATUS = {
     "hands_detected": 0,
     "hands_in_wheel_zone": 0,
     "both_hands_on_wheel": False,
+    "phone_detected": False,
     "driver_ok": False,
     "alerts": ["CAMERA STARTING"],
 }

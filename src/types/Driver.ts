@@ -13,6 +13,7 @@ export interface DriverStatus {
   hands_detected: number
   hands_in_wheel_zone: number
   both_hands_on_wheel: boolean
+  phone_detected: boolean
   driver_ok: boolean
   alerts: string[]
 }

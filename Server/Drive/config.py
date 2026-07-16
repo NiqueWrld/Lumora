@@ -32,6 +32,10 @@ MIN_FACE_DETECTION_CONF = 0.5
 MIN_FACE_TRACKING_CONF = 0.5
 MIN_HAND_DETECTION_CONF = 0.5
 MIN_HAND_TRACKING_CONF = 0.5
+MIN_PHONE_DETECTION_CONF = 0.4
+
+# Phone alerts trigger when a phone is seen in this fraction of recent frames.
+PHONE_SMOOTHING_THRESHOLD = 0.4
 
 # --- Stream ---
 JPEG_QUALITY = 80
