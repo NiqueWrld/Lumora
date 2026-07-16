@@ -1,8 +1,8 @@
-"""Sign language (hand gesture) detection using MediaPipe GestureRecognizer.
+"""Sign language detection: word gestures + ASL fingerspelling alphabet.
 
-Recognizes the canned gesture set (Closed_Fist, Open_Palm, Pointing_Up,
-Thumb_Down, Thumb_Up, Victory, ILoveYou) and maps each to a word. A gesture
-held for a short time is "committed" so clients can build a transcript.
+Word signs come from the MediaPipe GestureRecognizer canned set; letters
+A-Y (except motion-based J and Z) come from landmark geometry (alphabet.py).
+A sign held for a short time is "committed" so clients can build a transcript.
 """
 
 import threading
@@ -16,6 +16,8 @@ import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
+
+from Server.Signlanguage.alphabet import classify_letter
 
 _MODELS_DIR = Path(__file__).parent / "models"
 _MODEL_URL = (
@@ -59,6 +61,15 @@ _INITIAL_STATUS = {
     "progress": 0.0,
     "committed_word": None,
 }
+
+
+def _word_for(gesture: Optional[str]) -> Optional[str]:
+    """Map a gesture key (canned name or LETTER_x) to its display word."""
+    if not gesture:
+        return None
+    if gesture.startswith("LETTER_"):
+        return gesture[-1]
+    return WORDS.get(gesture, gesture)
 
 
 def _ensure_model() -> str:
@@ -112,7 +123,7 @@ class SignDetector:
             self._count = 1
         if self._count == COMMIT_FRAMES and gesture != self._last_committed:
             self._last_committed = gesture
-            return WORDS.get(gesture, gesture)
+            return _word_for(gesture)
         return None
 
     def process_jpeg(self, data: bytes) -> tuple[Optional[bytes], dict]:
@@ -139,6 +150,13 @@ class SignDetector:
                 gesture = top.category_name
                 score = top.score
 
+        # Fall back to fingerspelling when no word gesture is recognized.
+        if gesture is None and result.hand_landmarks:
+            letter, letter_score = classify_letter(result.hand_landmarks[0])
+            if letter is not None:
+                gesture = f"LETTER_{letter}"
+                score = letter_score
+
         for hand_landmarks in result.hand_landmarks:
             points = [(int(lm.x * w), int(lm.y * h)) for lm in hand_landmarks]
             for a, b in _HAND_CONNECTIONS:
@@ -150,7 +168,7 @@ class SignDetector:
         progress = (
             min(self._count / COMMIT_FRAMES, 1.0) if gesture else 0.0
         )
-        word = WORDS.get(gesture) if gesture else None
+        word = _word_for(gesture)
 
         if word:
             label = f"{word} ({score:.0%})"

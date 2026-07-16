@@ -94,7 +94,15 @@ function SignLanguage() {
           const s = JSON.parse(e.data) as SignStatus
           setStatus(s)
           if (s.committed_word) {
-            setWords((prev) => [...prev, s.committed_word as string])
+            const w = s.committed_word
+            setWords((prev) => {
+              // Merge fingerspelled letters into one growing token.
+              const last = prev[prev.length - 1]
+              if (w.length === 1 && last && /^[A-Z]+$/.test(last)) {
+                return [...prev.slice(0, -1), last + w]
+              }
+              return [...prev, w]
+            })
           }
           scheduleNextFrame()
         } else if (annotatedRef.current) {
@@ -181,7 +189,8 @@ function SignLanguage() {
               words.join(' ')
             ) : (
               <span className="text-gray-400">
-                Hold a sign to add it… (Hello, Yes, No, Good, Peace, I love you)
+                Hold a sign to add it… word signs (Hello, Yes, No, Good, Peace, I
+                love you) or fingerspell A–Y (J/Z need motion)
               </span>
             )}
           </div>
