@@ -12,7 +12,8 @@ import {
 import type { DriverStatus } from '../types/Driver'
 
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws/feed`
-const SEND_FPS = 10
+const MIN_FRAME_GAP_MS = 66 // cap ~15 fps; actual rate is bounded by server speed
+const CAPTURE_WIDTH = 640
 const JPEG_QUALITY = 0.7
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
@@ -40,16 +41,17 @@ function Monitor() {
   useEffect(() => {
     let closed = false
     let retry: ReturnType<typeof setTimeout>
-    let sendTimer: ReturnType<typeof setInterval>
+    let sendTimer: ReturnType<typeof setTimeout>
     let ws: WebSocket | null = null
     let stream: MediaStream | null = null
     let lastFrameUrl: string | null = null
+    let lastSentAt = 0
     const canvas = document.createElement('canvas')
 
     const startCamera = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 1280, height: 720 },
+          video: { width: 640, height: 360 },
           audio: false,
         })
         if (closed) {
@@ -68,18 +70,35 @@ function Monitor() {
 
     const sendFrame = () => {
       const video = videoRef.current
-      if (!video || !ws || ws.readyState !== WebSocket.OPEN) return
-      if (ws.bufferedAmount > 0 || video.videoWidth === 0) return
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      canvas.getContext('2d')?.drawImage(video, 0, 0)
+      if (closed || !video || !ws || ws.readyState !== WebSocket.OPEN) return
+      if (video.videoWidth === 0) {
+        // camera warming up - try again shortly
+        sendTimer = setTimeout(sendFrame, 200)
+        return
+      }
+      const scale = Math.min(1, CAPTURE_WIDTH / video.videoWidth)
+      canvas.width = Math.round(video.videoWidth * scale)
+      canvas.height = Math.round(video.videoHeight * scale)
+      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
       canvas.toBlob(
         (blob) => {
-          if (blob && ws?.readyState === WebSocket.OPEN) ws.send(blob)
+          if (blob && ws?.readyState === WebSocket.OPEN) {
+            lastSentAt = performance.now()
+            ws.send(blob)
+          } else {
+            sendTimer = setTimeout(sendFrame, 200)
+          }
         },
         'image/jpeg',
         JPEG_QUALITY,
       )
+    }
+
+    const scheduleNextFrame = () => {
+      // Ping-pong pacing: only one frame in flight, so latency never compounds.
+      const elapsed = performance.now() - lastSentAt
+      clearTimeout(sendTimer)
+      sendTimer = setTimeout(sendFrame, Math.max(0, MIN_FRAME_GAP_MS - elapsed))
     }
 
     const connect = () => {
@@ -87,11 +106,12 @@ function Monitor() {
       ws.binaryType = 'blob'
       ws.onopen = () => {
         setConnected(true)
-        sendTimer = setInterval(sendFrame, 1000 / SEND_FPS)
+        sendFrame()
       }
       ws.onmessage = (e) => {
         if (typeof e.data === 'string') {
           setStatus(JSON.parse(e.data) as DriverStatus)
+          scheduleNextFrame() // status is the last message of a response pair
         } else if (annotatedRef.current) {
           const url = URL.createObjectURL(e.data as Blob)
           annotatedRef.current.src = url
@@ -101,7 +121,7 @@ function Monitor() {
       }
       ws.onclose = () => {
         setConnected(false)
-        clearInterval(sendTimer)
+        clearTimeout(sendTimer)
         if (!closed) retry = setTimeout(connect, 2000)
       }
       ws.onerror = () => ws?.close()
@@ -111,7 +131,7 @@ function Monitor() {
     return () => {
       closed = true
       clearTimeout(retry)
-      clearInterval(sendTimer)
+      clearTimeout(sendTimer)
       ws?.close()
       stream?.getTracks().forEach((t) => t.stop())
       if (lastFrameUrl) URL.revokeObjectURL(lastFrameUrl)
