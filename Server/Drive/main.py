@@ -14,8 +14,8 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-import config
-from monitor import CameraWorker
+import Server.Drive.config as config
+from Server.Drive.monitor import CameraWorker
 
 worker = CameraWorker()
 

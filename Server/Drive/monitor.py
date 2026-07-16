@@ -7,8 +7,8 @@ from typing import Optional
 
 import cv2
 
-import config
-from detection import DriverMonitor
+import Server.Drive.config as config
+from Server.Drive.detection import DriverMonitor
 
 _INITIAL_STATUS = {
     "timestamp": None,

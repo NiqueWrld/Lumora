@@ -16,7 +16,7 @@ import numpy as np
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
 
-import config
+import Server.Drive.config as config
 
 _MODELS_DIR = Path(__file__).parent / "models"
 _MODEL_URLS = {
