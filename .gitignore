@@ -43,3 +43,7 @@ Thumbs.db
 
 # Model files (uncomment to exclude large binaries)
 # Server/models/*.task
+
+# PyInstaller output
+release/
+*.spec

@@ -1,23 +1,38 @@
 """FastAPI server exposing the driver monitoring camera feed and status.
 
 Endpoints:
-    GET /        - dashboard page (live stream + status)
-    GET /video   - MJPEG stream of the annotated camera feed
-    GET /status  - latest driver state as JSON
-    WS  /ws      - pushes the driver state ~10x per second
+    GET /api/status - latest driver state as JSON
+    GET /api/video  - MJPEG stream of the annotated camera feed
+    WS  /api/ws     - pushes the driver state ~10x per second
+    GET /*          - React web app (when a build is available)
 """
 
 import asyncio
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 import Server.Drive.config as config
 from Server.Drive.monitor import CameraWorker
 
 worker = CameraWorker()
+
+
+def _web_dir() -> Path | None:
+    """Locate the built React app (repo dist/ in dev, bundled dist/ when frozen)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parents[2]
+    web = base / "dist"
+    return web if (web / "index.html").is_file() else None
+
+
+WEB_DIR = _web_dir()
 
 
 @asynccontextmanager
@@ -30,7 +45,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Driver Monitor", lifespan=lifespan)
 
 
-@app.get("/status")
+@app.get("/api/status")
 def status() -> JSONResponse:
     return JSONResponse(worker.latest_status)
 
@@ -45,7 +60,7 @@ async def _mjpeg_generator():
         await asyncio.sleep(delay)
 
 
-@app.get("/video")
+@app.get("/api/video")
 def video() -> StreamingResponse:
     return StreamingResponse(
         _mjpeg_generator(),
@@ -53,7 +68,7 @@ def video() -> StreamingResponse:
     )
 
 
-@app.websocket("/ws")
+@app.websocket("/api/ws")
 async def ws(websocket: WebSocket):
     await websocket.accept()
     try:
@@ -64,55 +79,18 @@ async def ws(websocket: WebSocket):
         pass
 
 
-INDEX_HTML = """<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Driver Monitor</title>
-<style>
-  body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0;
-       padding:24px;display:flex;gap:24px;flex-wrap:wrap}
-  img{max-width:840px;width:100%;border:1px solid #333;border-radius:8px}
-  #panel{min-width:280px;flex:1}
-  .badge{display:inline-block;padding:6px 12px;border-radius:6px;
-         font-weight:600;margin:4px 0}
-  .ok{background:#0a5}.bad{background:#c33}
-  pre{background:#1b1b1b;padding:12px;border-radius:8px;overflow:auto;font-size:12px}
-</style>
-</head>
-<body>
-  <div><img src="/video" alt="camera stream"></div>
-  <div id="panel">
-    <h2>Driver status</h2>
-    <div id="focus" class="badge bad">ROAD FOCUS: ?</div><br>
-    <div id="hands" class="badge bad">HANDS ON WHEEL: ?</div>
-    <pre id="raw">connecting...</pre>
-  </div>
-<script>
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onmessage = (e) => {
-    const s = JSON.parse(e.data);
-    const f = document.getElementById("focus");
-    f.textContent = "ROAD FOCUS: " + (s.focused_on_road ? "YES" : "NO");
-    f.className = "badge " + (s.focused_on_road ? "ok" : "bad");
-    const hd = document.getElementById("hands");
-    hd.textContent = `HANDS ON WHEEL: ${s.hands_in_wheel_zone}/2`;
-    hd.className = "badge " + (s.both_hands_on_wheel ? "ok" : "bad");
-    document.getElementById("raw").textContent = JSON.stringify(s, null, 2);
-  };
-  ws.onclose = () => {
-    document.getElementById("raw").textContent = "connection closed";
-  };
-</script>
-</body>
-</html>
-"""
-
-
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    return INDEX_HTML
+@app.get("/{path:path}", response_model=None)
+def spa(path: str) -> FileResponse | JSONResponse:
+    """Serve the built React app with SPA fallback for client-side routes."""
+    if WEB_DIR is None:
+        return JSONResponse(
+            {"detail": "Web build not found. Run 'pnpm build' or use the Vite dev server."},
+            status_code=404,
+        )
+    file = (WEB_DIR / path).resolve() if path else WEB_DIR / "index.html"
+    if file.is_file() and file.is_relative_to(WEB_DIR):
+        return FileResponse(file)
+    return FileResponse(WEB_DIR / "index.html")
 
 
 if __name__ == "__main__":
