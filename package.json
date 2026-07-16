@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -n app,server,desktop -c cyan,magenta,yellow \"npm:dev:app\" \"npm:dev:server\" \"npm:dev:desktop\"",
     "dev:app": "vite",
-    "dev:server": "nodemon --watch Server/Drive --ext py --ignore Server/Drive/__pycache__ --exec \"Server/Drive/.venv/Scripts/python.exe -m Server.Drive.main\"",
+    "dev:server": "nodemon --watch Server/Drive --ext py --ignore Server/Drive/__pycache__ --exec \"Server/.venv/Scripts/python.exe -m Server.Drive.main\"",
     "dev:desktop": "electron .",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
