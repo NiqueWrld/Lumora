@@ -175,14 +175,24 @@ function Monitor() {
   ]
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold dark:text-white flex items-center gap-2">
+    <div className="relative -m-4 md:-m-6 h-[calc(100dvh-4rem)] overflow-hidden bg-black">
+      {/* Hidden local webcam element used as the capture source */}
+      <video ref={videoRef} muted playsInline className="hidden" />
+      {/* Annotated frame returned by the server, filling the viewport */}
+      <img
+        ref={annotatedRef}
+        alt="Processed camera feed"
+        className="h-full w-full object-cover"
+      />
+
+      {/* Top bar */}
+      <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3">
+        <h1 className="flex items-center gap-2 text-xl font-bold text-white drop-shadow">
           <SteeringWheel /> Driver Monitor
         </h1>
         <span
-          className={`inline-flex items-center gap-1 text-sm ${
-            connected ? 'text-green-600 dark:text-green-400' : 'text-gray-400'
+          className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-medium backdrop-blur ${
+            connected ? 'bg-green-500/20 text-green-300' : 'bg-white/10 text-gray-300'
           }`}
         >
           <Plugs weight="bold" />
@@ -190,52 +200,49 @@ function Monitor() {
         </span>
       </div>
 
-      {cameraError && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          <WarningCircle size={20} weight="fill" />
-          <span className="font-medium">{cameraError}</span>
-        </div>
-      )}
-
-      {status && !status.driver_ok && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
-          <WarningCircle size={20} weight="fill" />
-          <span className="font-medium">{status.alerts.join(' · ')}</span>
-        </div>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 overflow-hidden rounded-xl border border-gray-200 bg-black dark:border-gray-700">
-          {/* Hidden local webcam element used as the capture source */}
-          <video ref={videoRef} muted playsInline className="hidden" />
-          {/* Annotated frame returned by the server */}
-          <img ref={annotatedRef} alt="Processed camera feed" className="w-full" />
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {cards.map(({ label, ok, detail, icon: Icon }) => (
-            <div
-              key={label}
-              className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
-            >
-              <div className="flex items-center gap-3">
-                <Icon size={24} className="text-gray-500 dark:text-gray-400" />
-                <div>
-                  <div className="font-medium dark:text-white">{label}</div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">{detail}</div>
-                </div>
-              </div>
-              <StatusPill ok={ok} label={ok ? 'OK' : 'Alert'} />
-            </div>
-          ))}
-
-          <div
-            className={`rounded-xl p-4 text-center font-semibold text-white ${
-              status?.driver_ok ? 'bg-green-600' : 'bg-red-600'
-            }`}
-          >
-            {status?.driver_ok ? 'DRIVER OK' : 'ATTENTION REQUIRED'}
+      {/* Alerts */}
+      <div className="pointer-events-none absolute inset-x-0 top-16 flex flex-col items-center gap-2 px-4">
+        {cameraError && (
+          <div className="flex items-center gap-2 rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur">
+            <WarningCircle size={18} weight="fill" />
+            {cameraError}
           </div>
+        )}
+        {status && !status.driver_ok && (
+          <div className="flex items-center gap-2 rounded-lg bg-red-600/90 px-4 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur">
+            <WarningCircle size={18} weight="fill" />
+            {status.alerts.join(' · ')}
+          </div>
+        )}
+      </div>
+
+      {/* Status cards */}
+      <div className="absolute bottom-16 right-4 top-16 hidden w-72 flex-col justify-center gap-2 sm:flex">
+        {cards.map(({ label, ok, detail, icon: Icon }) => (
+          <div
+            key={label}
+            className="flex items-center justify-between rounded-xl bg-gray-900/60 p-3 backdrop-blur"
+          >
+            <div className="flex items-center gap-3">
+              <Icon size={22} className="text-gray-300" />
+              <div>
+                <div className="text-sm font-medium text-white">{label}</div>
+                <div className="text-xs text-gray-300">{detail}</div>
+              </div>
+            </div>
+            <StatusPill ok={ok} label={ok ? 'OK' : 'Alert'} />
+          </div>
+        ))}
+      </div>
+
+      {/* Overall state */}
+      <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-8">
+        <div
+          className={`rounded-full px-6 py-2 text-sm font-bold tracking-wide text-white shadow-lg ${
+            status?.driver_ok ? 'bg-green-600/90' : 'bg-red-600/90'
+          }`}
+        >
+          {status?.driver_ok ? 'DRIVER OK' : 'ATTENTION REQUIRED'}
         </div>
       </div>
     </div>
