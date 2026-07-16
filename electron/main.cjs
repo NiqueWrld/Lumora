@@ -7,6 +7,11 @@ function createWindow() {
     width: 1400,
     height: 900,
     autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   })
 
   // Retry until the Vite dev server is up.
