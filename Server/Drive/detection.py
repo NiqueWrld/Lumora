@@ -16,7 +16,9 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python as mp_tasks
+from mediapipe.tasks.python import audio as mp_audio
 from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.components import containers as mp_containers
 
 import Server.Drive.config as config
 
@@ -33,6 +35,10 @@ _MODEL_URLS = {
     "efficientdet_lite0.tflite": (
         "https://storage.googleapis.com/mediapipe-models/object_detector/"
         "efficientdet_lite0/float16/1/efficientdet_lite0.tflite"
+    ),
+    "yamnet.tflite": (
+        "https://storage.googleapis.com/mediapipe-models/audio_classifier/"
+        "yamnet/float32/1/yamnet.tflite"
     ),
 }
 
@@ -96,6 +102,54 @@ class _BoolSmoother:
     def update(self, value: bool) -> bool:
         self._values.append(bool(value))
         return (sum(self._values) / len(self._values)) >= self._threshold
+
+
+class MusicDetector:
+    """Classifies mic audio chunks (YAMNet) and flags loud music."""
+
+    def __init__(self):
+        paths = _ensure_models()
+        self._classifier = mp_audio.AudioClassifier.create_from_options(
+            mp_audio.AudioClassifierOptions(
+                base_options=mp_tasks.BaseOptions(
+                    model_asset_path=paths["yamnet.tflite"]
+                ),
+                max_results=8,
+            )
+        )
+        self._smoother = _BoolSmoother(
+            config.AUDIO_SMOOTHING_WINDOW, config.SMOOTHING_THRESHOLD
+        )
+
+    def close(self):
+        self._classifier.close()
+
+    def process_chunk(self, pcm: np.ndarray, sample_rate: int) -> dict:
+        """Analyze one mono float32 PCM chunk. Returns an audio status dict."""
+        rms = float(np.sqrt(np.mean(np.square(pcm)))) if pcm.size else 0.0
+        db = 20.0 * math.log10(rms) if rms > 1e-9 else -100.0
+
+        clip = mp_containers.AudioData.create_from_array(
+            pcm.astype(np.float32), sample_rate
+        )
+        music_score = 0.0
+        for result in self._classifier.classify(clip):
+            for classification in result.classifications:
+                for cat in classification.categories:
+                    if cat.category_name == "Music":
+                        music_score = max(music_score, cat.score)
+
+        music_now = music_score >= config.MUSIC_SCORE_THRESHOLD
+        loud_now = db >= config.LOUD_MUSIC_DB
+        loud_music = self._smoother.update(music_now and loud_now)
+
+        return {
+            "timestamp": time.time(),
+            "music_detected": music_now,
+            "music_score": round(music_score, 2),
+            "audio_db": round(db, 1),
+            "loud_music": loud_music,
+        }
 
 
 class DriverMonitor:

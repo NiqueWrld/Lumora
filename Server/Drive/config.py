@@ -37,6 +37,13 @@ MIN_PHONE_DETECTION_CONF = 0.4
 # Phone alerts trigger when a phone is seen in this fraction of recent frames.
 PHONE_SMOOTHING_THRESHOLD = 0.4
 
+# --- Audio / loud music ---
+AUDIO_SAMPLE_RATE = 16000     # expected sample rate of client audio chunks
+MUSIC_SCORE_THRESHOLD = 0.3   # YAMNet "Music" score considered music
+LOUD_MUSIC_DB = -20.0         # RMS dBFS above which audio counts as loud
+AUDIO_SMOOTHING_WINDOW = 4    # ~1s chunks considered for the loud-music vote
+AUDIO_STALE_SEC = 3.0         # ignore audio state older than this
+
 # --- Stream ---
 JPEG_QUALITY = 80
 STREAM_FPS = 30

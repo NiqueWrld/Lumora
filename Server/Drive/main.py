@@ -1,24 +1,29 @@
-"""FastAPI server processing a client-supplied camera feed.
+"""FastAPI server processing a client-supplied camera and microphone feed.
 
 Endpoints:
-    GET /api/status  - latest driver state as JSON
-    WS  /api/ws/feed - client sends JPEG frames (binary); server replies with
-                       the annotated frame (binary) followed by status (JSON)
-    GET /*           - React web app (when a build is available)
+    GET /api/status   - latest driver state as JSON
+    WS  /api/ws/feed  - client sends JPEG frames (binary); server replies with
+                        the annotated frame (binary) followed by status (JSON)
+    WS  /api/ws/audio - client sends 16kHz mono float32 PCM chunks (binary);
+                        server replies with the audio status (JSON)
+    GET /*            - React web app (when a build is available)
 """
 
 import asyncio
 import sys
 from pathlib import Path
 
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
 import Server.Drive.config as config
+from Server.Drive.detection import MusicDetector
 from Server.Drive.monitor import FeedProcessor
 
 processor = FeedProcessor()
+music_detector = MusicDetector()
 
 
 def _web_dir() -> Path | None:
@@ -59,6 +64,24 @@ async def ws_feed(websocket: WebSocket):
             if annotated is not None:
                 await websocket.send_bytes(annotated)
             await websocket.send_json(frame_status)
+    except WebSocketDisconnect:
+        pass
+
+
+@app.websocket("/api/ws/audio")
+async def ws_audio(websocket: WebSocket):
+    """Receive mic audio chunks, classify them, and update the shared state."""
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            pcm = np.frombuffer(data, dtype=np.float32)
+            audio_status = await loop.run_in_executor(
+                None, music_detector.process_chunk, pcm, config.AUDIO_SAMPLE_RATE
+            )
+            processor.set_audio_status(audio_status)
+            await websocket.send_json(audio_status)
     except WebSocketDisconnect:
         pass
 

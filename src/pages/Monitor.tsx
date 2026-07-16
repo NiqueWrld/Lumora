@@ -4,6 +4,7 @@ import {
   DeviceMobile,
   Eye,
   HandPalm,
+  SpeakerHigh,
   SteeringWheel,
   WarningCircle,
   CheckCircle,
@@ -13,6 +14,9 @@ import {
 import type { DriverStatus } from '../types/Driver'
 
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws/feed`
+const AUDIO_WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws/audio`
+const AUDIO_SAMPLE_RATE = 16000
+const AUDIO_CHUNK_SAMPLES = 15600 // ~0.975s, YAMNet's native window
 const MIN_FRAME_GAP_MS = 66 // cap ~15 fps; actual rate is bounded by server speed
 const CAPTURE_WIDTH = 640
 const JPEG_QUALITY = 0.7
@@ -36,6 +40,7 @@ function Monitor() {
   const [status, setStatus] = useState<DriverStatus | null>(null)
   const [connected, setConnected] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
+  const [micActive, setMicActive] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const annotatedRef = useRef<HTMLImageElement>(null)
 
@@ -139,6 +144,78 @@ function Monitor() {
     }
   }, [])
 
+  // Microphone capture: stream ~1s PCM chunks to the audio endpoint.
+  useEffect(() => {
+    let closed = false
+    let retry: ReturnType<typeof setTimeout>
+    let ws: WebSocket | null = null
+    let stream: MediaStream | null = null
+    let ctx: AudioContext | null = null
+    let source: MediaStreamAudioSourceNode | null = null
+    let tap: ScriptProcessorNode | null = null
+    let buffer = new Float32Array(0)
+
+    const startMic = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        })
+        if (closed) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        ctx = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE })
+        source = ctx.createMediaStreamSource(stream)
+        tap = ctx.createScriptProcessor(4096, 1, 1)
+        source.connect(tap)
+        const mute = ctx.createGain()
+        mute.gain.value = 0
+        tap.connect(mute)
+        mute.connect(ctx.destination)
+
+        tap.onaudioprocess = (e) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return
+          const chunk = e.inputBuffer.getChannelData(0)
+          const merged = new Float32Array(buffer.length + chunk.length)
+          merged.set(buffer)
+          merged.set(chunk, buffer.length)
+          buffer = merged
+          if (buffer.length >= AUDIO_CHUNK_SAMPLES && ws.bufferedAmount === 0) {
+            ws.send(buffer.slice(0, AUDIO_CHUNK_SAMPLES).buffer)
+            buffer = buffer.slice(AUDIO_CHUNK_SAMPLES)
+          }
+        }
+        setMicActive(true)
+        connect()
+      } catch {
+        setMicActive(false)
+      }
+    }
+
+    const connect = () => {
+      ws = new WebSocket(AUDIO_WS_URL)
+      ws.onclose = () => {
+        if (!closed) retry = setTimeout(connect, 2000)
+      }
+      ws.onerror = () => ws?.close()
+    }
+
+    startMic()
+    return () => {
+      closed = true
+      clearTimeout(retry)
+      ws?.close()
+      tap?.disconnect()
+      source?.disconnect()
+      ctx?.close()
+      stream?.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
   const cards = [
     {
       label: 'Camera',
@@ -171,6 +248,18 @@ function Monitor() {
       ok: !(status?.phone_detected ?? false),
       detail: status?.phone_detected ? 'Phone in use' : 'No phone visible',
       icon: DeviceMobile,
+    },
+    {
+      label: 'Music',
+      ok: !(status?.loud_music ?? false),
+      detail: !micActive
+        ? 'Mic unavailable'
+        : status?.loud_music
+          ? `Too loud (${status.audio_db ?? '?'} dB)`
+          : status?.audio_db != null
+            ? `Level ${status.audio_db} dB`
+            : 'Listening…',
+      icon: SpeakerHigh,
     },
   ]
 

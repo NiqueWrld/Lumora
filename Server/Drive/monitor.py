@@ -21,6 +21,8 @@ _INITIAL_STATUS = {
     "hands_in_wheel_zone": 0,
     "both_hands_on_wheel": False,
     "phone_detected": False,
+    "loud_music": False,
+    "audio_db": None,
     "driver_ok": False,
     "alerts": ["CAMERA STARTING"],
 }
@@ -35,11 +37,32 @@ class FeedProcessor:
         self._detector = DriverMonitor()
         self._lock = threading.Lock()
         self._latest_status: dict = dict(_INITIAL_STATUS)
+        self._audio_status: dict = {}
 
     @property
     def latest_status(self) -> dict:
         with self._lock:
             return dict(self._latest_status)
+
+    def set_audio_status(self, audio: dict):
+        with self._lock:
+            self._audio_status = audio
+
+    def _merge_audio(self, status: dict) -> dict:
+        """Fold the latest (non-stale) audio state into a frame status."""
+        with self._lock:
+            audio = dict(self._audio_status)
+        fresh = (
+            bool(audio)
+            and time.time() - audio.get("timestamp", 0) <= config.AUDIO_STALE_SEC
+        )
+        loud = fresh and bool(audio.get("loud_music"))
+        status["loud_music"] = loud
+        status["audio_db"] = audio.get("audio_db") if fresh else None
+        if loud:
+            status["alerts"].append("TURN THE MUSIC DOWN")
+            status["driver_ok"] = False
+        return status
 
     def process_jpeg(self, data: bytes) -> tuple[Optional[bytes], dict]:
         """Decode a JPEG frame, run detection, return (annotated jpeg, status)."""
@@ -47,6 +70,7 @@ class FeedProcessor:
         if frame is None:
             return None, self.latest_status
         frame, status = self._detector.process(frame)
+        status = self._merge_audio(status)
         ok, jpeg = cv2.imencode(
             ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY]
         )

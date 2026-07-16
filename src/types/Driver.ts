@@ -14,6 +14,8 @@ export interface DriverStatus {
   hands_in_wheel_zone: number
   both_hands_on_wheel: boolean
   phone_detected: boolean
+  loud_music: boolean
+  audio_db: number | null
   driver_ok: boolean
   alerts: string[]
 }
