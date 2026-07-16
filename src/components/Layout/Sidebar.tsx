@@ -2,11 +2,12 @@ import { useAuth } from '../../context/AuthContext'
 import { useNavigate, NavLink, Link } from 'react-router-dom'
 import { APP_NAME, APP_LOGO } from '../../lib/constants'
 import { ROUTES } from '../../lib/routes'
-import { SquaresFour, SteeringWheel, User, Gear, SignOut } from '@phosphor-icons/react'
+import { SquaresFour, SteeringWheel, HandWaving, User, Gear, SignOut } from '@phosphor-icons/react'
 
 const links = [
   { label: 'Dashboard', href: ROUTES.DASHBOARD, icon: SquaresFour },
   { label: 'Monitor', href: ROUTES.MONITOR, icon: SteeringWheel },
+  { label: 'Sign Language', href: ROUTES.SIGN_LANGUAGE, icon: HandWaving },
   { label: 'Profile', href: ROUTES.PROFILE, icon: User },
   { label: 'Settings', href: ROUTES.SETTINGS, icon: Gear },
 ]

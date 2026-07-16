@@ -7,6 +7,7 @@ import Settings from './pages/Auth/Settings'
 import Home from './pages/index'
 import Dashboard from './pages/Dashboard'
 import Monitor from './pages/Monitor'
+import SignLanguage from './pages/SignLanguage'
 import NotFound from './pages/NotFound'
 import Layout from './components/Layout'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -35,6 +36,14 @@ function AppRoutes() {
         element={
           user
             ? <Layout><Monitor /></Layout>
+            : <Navigate to={ROUTES.LOGIN} replace />
+        }
+      />
+      <Route
+        path={ROUTES.SIGN_LANGUAGE}
+        element={
+          user
+            ? <Layout><SignLanguage /></Layout>
             : <Navigate to={ROUTES.LOGIN} replace />
         }
       />

@@ -6,6 +6,9 @@ Endpoints:
                         the annotated frame (binary) followed by status (JSON)
     WS  /api/ws/audio - client sends 16kHz mono float32 PCM chunks (binary);
                         server replies with the audio status (JSON)
+    WS  /api/ws/sign  - client sends JPEG frames (binary); server replies with
+                        the annotated frame (binary) followed by the sign
+                        language status (JSON)
     GET /*            - React web app (when a build is available)
 """
 
@@ -21,9 +24,11 @@ from fastapi.responses import FileResponse, JSONResponse
 import Server.Drive.config as config
 from Server.Drive.detection import MusicDetector
 from Server.Drive.monitor import FeedProcessor
+from Server.Signlanguage.detection import SignDetector
 
 processor = FeedProcessor()
 music_detector = MusicDetector()
+sign_detector = SignDetector()
 
 
 def _web_dir() -> Path | None:
@@ -82,6 +87,24 @@ async def ws_audio(websocket: WebSocket):
             )
             processor.set_audio_status(audio_status)
             await websocket.send_json(audio_status)
+    except WebSocketDisconnect:
+        pass
+
+
+@app.websocket("/api/ws/sign")
+async def ws_sign(websocket: WebSocket):
+    """Receive webcam frames and respond with sign language recognition."""
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            annotated, sign_status = await loop.run_in_executor(
+                None, sign_detector.process_jpeg, data
+            )
+            if annotated is not None:
+                await websocket.send_bytes(annotated)
+            await websocket.send_json(sign_status)
     except WebSocketDisconnect:
         pass
 
