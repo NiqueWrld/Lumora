@@ -1,25 +1,24 @@
-"""FastAPI server exposing the driver monitoring camera feed and status.
+"""FastAPI server processing a client-supplied camera feed.
 
 Endpoints:
-    GET /api/status - latest driver state as JSON
-    GET /api/video  - MJPEG stream of the annotated camera feed
-    WS  /api/ws     - pushes the driver state ~10x per second
-    GET /*          - React web app (when a build is available)
+    GET /api/status  - latest driver state as JSON
+    WS  /api/ws/feed - client sends JPEG frames (binary); server replies with
+                       the annotated frame (binary) followed by status (JSON)
+    GET /*           - React web app (when a build is available)
 """
 
 import asyncio
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 import Server.Drive.config as config
-from Server.Drive.monitor import CameraWorker
+from Server.Drive.monitor import FeedProcessor
 
-worker = CameraWorker()
+processor = FeedProcessor()
 
 
 def _web_dir() -> Path | None:
@@ -34,47 +33,32 @@ def _web_dir() -> Path | None:
 
 WEB_DIR = _web_dir()
 
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    worker.start()
-    yield
-    worker.stop()
-
-
-app = FastAPI(title="Driver Monitor", lifespan=lifespan)
+app = FastAPI(title="Driver Monitor")
 
 
 @app.get("/api/status")
 def status() -> JSONResponse:
-    return JSONResponse(worker.latest_status)
+    return JSONResponse(processor.latest_status)
 
 
-async def _mjpeg_generator():
-    boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-    delay = 1.0 / config.STREAM_FPS
-    while True:
-        jpeg = worker.latest_jpeg
-        if jpeg is not None:
-            yield boundary + jpeg + b"\r\n"
-        await asyncio.sleep(delay)
+@app.websocket("/api/ws/feed")
+async def ws_feed(websocket: WebSocket):
+    """Receive webcam frames from the browser, respond with results.
 
-
-@app.get("/api/video")
-def video() -> StreamingResponse:
-    return StreamingResponse(
-        _mjpeg_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
-
-
-@app.websocket("/api/ws")
-async def ws(websocket: WebSocket):
+    Client sends each frame as a binary JPEG message. For every frame the
+    server sends back the annotated JPEG (binary), then the status (JSON).
+    """
     await websocket.accept()
+    loop = asyncio.get_running_loop()
     try:
         while True:
-            await websocket.send_json(worker.latest_status)
-            await asyncio.sleep(0.1)
+            data = await websocket.receive_bytes()
+            annotated, frame_status = await loop.run_in_executor(
+                None, processor.process_jpeg, data
+            )
+            if annotated is not None:
+                await websocket.send_bytes(annotated)
+            await websocket.send_json(frame_status)
     except WebSocketDisconnect:
         pass
 

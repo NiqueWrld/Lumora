@@ -6,6 +6,7 @@ import time
 from typing import Optional
 
 import cv2
+import numpy as np
 
 import Server.Drive.config as config
 from Server.Drive.detection import DriverMonitor
@@ -24,6 +25,36 @@ _INITIAL_STATUS = {
 }
 
 _MAX_READ_FAILURES = 30  # consecutive failures before the camera is reopened
+
+
+class FeedProcessor:
+    """Processes frames pushed by a client (browser webcam feed)."""
+
+    def __init__(self):
+        self._detector = DriverMonitor()
+        self._lock = threading.Lock()
+        self._latest_status: dict = dict(_INITIAL_STATUS)
+
+    @property
+    def latest_status(self) -> dict:
+        with self._lock:
+            return dict(self._latest_status)
+
+    def process_jpeg(self, data: bytes) -> tuple[Optional[bytes], dict]:
+        """Decode a JPEG frame, run detection, return (annotated jpeg, status)."""
+        frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return None, self.latest_status
+        frame, status = self._detector.process(frame)
+        ok, jpeg = cv2.imencode(
+            ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY]
+        )
+        with self._lock:
+            self._latest_status = status
+        return (jpeg.tobytes() if ok else None), status
+
+    def close(self):
+        self._detector.close()
 
 
 class CameraWorker:
